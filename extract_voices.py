@@ -50,6 +50,12 @@ SAMPLES_PER_TICK = SAMPLE_RATE // TICKS_PER_SECOND  # 2400
 VOICE_ACTION = "flashback:action/simple_voice_chat_sound_optional"
 TICK_ACTION = "flashback:action/next_tick"
 
+# 0xDEADBEEF lu en int32 signe : marqueur de taille de snapshot pas encore ecrite
+SNAPSHOT_PLACEHOLDER = -559038737
+
+# en dessous, un reste de paquet tronque est un clic, pas de la parole
+MIN_SALVAGE_SAMPLES = 480  # 10 ms
+
 NAME_CHARS = set(b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
 
@@ -67,8 +73,20 @@ def read_varint(mm, pos):
         shift += 7
 
 
+class ChunkDamage(Exception):
+    """Chunk inexploitable, avec la raison en message."""
+
+
+class UnfinalizedChunk(ChunkDamage):
+    """Chunk dont le snapshot n'a jamais ete termine : l'enregistrement s'est
+    interrompu (crash, fermeture forcee) pendant son ecriture."""
+
+    def __str__(self):
+        return "enregistrement interrompu pendant ce chunk (snapshot non finalise)"
+
+
 def read_header(mm):
-    """Renvoie (noms d'actions, offset debut snapshot, offset debut actions)."""
+    """Renvoie (magic, noms d'actions, offset debut snapshot, offset debut actions)."""
     magic = struct.unpack_from(">i", mm, 0)[0]
     pos = 4
     count, pos = read_varint(mm, pos)
@@ -79,8 +97,12 @@ def read_header(mm):
         pos += n
     snapshot_size = struct.unpack_from(">i", mm, pos)[0]
     pos += 4
-    if snapshot_size < 0:
-        raise RuntimeError(f"taille de snapshot invalide: {snapshot_size}")
+    if snapshot_size == SNAPSHOT_PLACEHOLDER:
+        # Flashback reserve 4 octets avec 0xDEADBEEF avant d'ecrire le snapshot,
+        # et n'y inscrit la vraie taille qu'une fois celui-ci termine.
+        raise UnfinalizedChunk()
+    if snapshot_size < 0 or pos + snapshot_size > len(mm):
+        raise ChunkDamage(f"taille de snapshot invalide ({snapshot_size})")
     return magic, names, pos, pos + snapshot_size
 
 
@@ -196,6 +218,102 @@ def safe(name):
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
 
+# ---------------------------------------------------------------- lecture d'un chunk
+
+def get_track(tracks, u, out_dir, tolerance):
+    track = tracks.get(u)
+    if track is None:
+        track = Track(out_dir / f"{u}.wav", tolerance)
+        tracks[u] = track
+    return track
+
+
+def salvage_voice(mm, pos, end, tick, tracks, out_dir, tolerance):
+    """Recupere ce qui est lisible d'un dernier paquet voix tronque."""
+    if pos + 17 > end:
+        return 0
+    try:
+        u = uuidlib.UUID(bytes=mm[pos:pos + 16])
+        nsamples, p = read_varint(mm, pos + 16)
+    except (ValueError, IndexError):
+        return 0
+    nsamples = min(nsamples, (end - p) // 2)
+    if nsamples < MIN_SALVAGE_SAMPLES:
+        return 0                      # trop court pour etre autre chose qu'un clic
+    pcm = array("h")
+    pcm.frombytes(mm[p:p + nsamples * 2])
+    pcm.byteswap()
+    get_track(tracks, u, out_dir, tolerance).write(tick, pcm.tobytes(), nsamples)
+    return 1
+
+
+def scan_actions(mm, pos, names, voice_id, tick_id, base_tick, tracks, out_dir, tolerance, uuid_cache):
+    """Parcourt le flux d'actions d'un chunk et alimente les pistes.
+
+    Renvoie (paquets voix lus, ticks comptes, degat). 'degat' vaut None si le
+    chunk a ete lu jusqu'au bout, sinon decrit l'anomalie qui a stoppe la
+    lecture : tout ce qui precede est conserve.
+    """
+    end = len(mm)
+    nnames = len(names)
+    tick = base_tick
+    nvoice = 0
+    frame = pos
+    try:
+        while pos < end:
+            frame = pos
+            b = mm[pos]
+            pos += 1
+            if b & 0x80:
+                extra, pos = read_varint(mm, pos)
+                aid = (b & 0x7F) | (extra << 7)
+            else:
+                aid = b
+
+            if pos + 4 > end:
+                return nvoice, tick - base_tick, f"flux tronque a l'octet {frame}"
+            size = struct.unpack_from(">i", mm, pos)[0]
+            pos += 4
+
+            if aid >= nnames:
+                return nvoice, tick - base_tick, f"action inconnue ({aid}) a l'octet {frame}"
+            if size < 0 or pos + size > end:
+                # derniere action coupee : on sauve la parole qu'elle contient encore
+                if aid == voice_id:
+                    nvoice += salvage_voice(mm, pos, end, tick, tracks, out_dir, tolerance)
+                return nvoice, tick - base_tick, (
+                    f"action coupee a l'octet {frame} ({size} octets annonces, "
+                    f"{end - pos} disponibles)")
+
+            if aid == tick_id:
+                tick += 1
+                pos += size
+                continue
+            if aid != voice_id:
+                pos += size
+                continue
+
+            start = pos
+            raw = mm[pos:pos + 16]
+            u = uuid_cache.get(raw)
+            if u is None:
+                u = uuidlib.UUID(bytes=raw)
+                uuid_cache[raw] = u
+            p = start + 16
+            nsamples, p = read_varint(mm, p)
+            if nsamples:
+                pcm = array("h")
+                pcm.frombytes(mm[p:p + nsamples * 2])
+                pcm.byteswap()  # big-endian (Java) -> little-endian (WAV)
+                get_track(tracks, u, out_dir, tolerance).write(tick, pcm.tobytes(), nsamples)
+                nvoice += 1
+            pos = start + size
+    except (IndexError, ValueError, struct.error) as exc:
+        return nvoice, tick - base_tick, f"donnees illisibles a l'octet {frame} ({type(exc).__name__})"
+
+    return nvoice, tick - base_tick, None
+
+
 # ---------------------------------------------------------------- passe principale
 
 def main():
@@ -240,95 +358,91 @@ def main():
 
     tracks = {}
     tick_offset = 0
+    last_ok_tick = 0
     t0 = time.time()
     total_voice_actions = 0
     uuid_cache = {}
+    names_map = {}
+    damaged = []
 
     for ci, chunk_name in enumerate(chunk_names):
+        duration = meta["chunks"][chunk_name]["duration"]
         path = replay / chunk_name
-        with open(path, "rb") as fh:
-            mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
-            try:
-                magic, names, snap_start, actions_start = read_header(mm)
-                if VOICE_ACTION not in names:
-                    print(f"  {chunk_name}: aucune action voix, ignore")
-                    tick_offset += meta["chunks"][chunk_name]["duration"]
-                    continue
-                voice_id = names.index(VOICE_ACTION)
-                tick_id = names.index(TICK_ACTION)
+        nvoice = 0
+        counted = duration
+        damage = None
+        note = ""
 
-                pos = actions_start
-                size_total = len(mm)
-                tick = tick_offset
-                nvoice = 0
-
-                while pos < size_total:
-                    b = mm[pos]
-                    pos += 1
-                    if b & 0x80:
-                        extra, pos = read_varint(mm, pos)
-                        aid = (b & 0x7F) | (extra << 7)
+        # Un chunk abime ne doit jamais faire perdre les precedents : on isole sa
+        # lecture, on garde ce qui a pu etre extrait, et on passe au suivant.
+        try:
+            if path.stat().st_size == 0:
+                raise ChunkDamage("fichier vide")
+            with open(path, "rb") as fh:
+                mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+                try:
+                    magic, names, snap_start, actions_start = read_header(mm)
+                    if VOICE_ACTION in names:
+                        nvoice, counted, damage = scan_actions(
+                            mm, actions_start, names,
+                            names.index(VOICE_ACTION), names.index(TICK_ACTION),
+                            tick_offset, tracks, out_dir, tolerance, uuid_cache)
+                        # noms de joueurs : cherches dans le snapshot du premier chunk
+                        if ci == 0:
+                            names_map.update(find_names(mm, snap_start, actions_start, list(tracks)))
                     else:
-                        aid = b
-                    size = struct.unpack_from(">i", mm, pos)[0]
-                    pos += 4
-                    if aid == tick_id:
-                        tick += 1
-                        pos += size
-                        continue
-                    if aid != voice_id:
-                        pos += size
-                        continue
+                        note = "  aucune action voix"
+                finally:
+                    mm.close()
+        except ChunkDamage as exc:
+            damage = str(exc)
+        except FileNotFoundError:
+            damage = "fichier absent"
+        except Exception as exc:
+            damage = f"{type(exc).__name__}: {exc}"
 
-                    start = pos
-                    raw = mm[pos:pos + 16]
-                    u = uuid_cache.get(raw)
-                    if u is None:
-                        u = uuidlib.UUID(bytes=raw)
-                        uuid_cache[raw] = u
-                    p = start + 16
-                    nsamples, p = read_varint(mm, p)
-                    if nsamples:
-                        pcm = array("h")
-                        pcm.frombytes(mm[p:p + nsamples * 2])
-                        pcm.byteswap()  # big-endian (Java) -> little-endian (WAV)
-                        track = tracks.get(u)
-                        if track is None:
-                            track = Track(out_dir / f"{u}.wav", tolerance)
-                            tracks[u] = track
-                        track.write(tick, pcm.tobytes(), nsamples)
-                        nvoice += 1
-                    pos = start + size
+        total_voice_actions += nvoice
+        if damage is None or nvoice:
+            last_ok_tick = max(last_ok_tick, tick_offset + duration)
+        if damage:
+            damaged.append((chunk_name, damage, nvoice))
+            note = f"  [!] {damage}"
+        elif counted != duration:
+            note = f"  [!] {counted} ticks lus, {duration} attendus"
 
-                expected = meta["chunks"][chunk_name]["duration"]
-                counted = tick - tick_offset
-                warn = "" if counted == expected else f"  [!] {counted} ticks lus, {expected} attendus"
-                total_voice_actions += nvoice
-                elapsed = time.time() - t0
-                print(f"  [{ci + 1:2d}/{len(chunk_names)}] {chunk_name:16s} "
-                      f"{nvoice:7d} paquets voix  {len(tracks)} voix  {elapsed:6.1f}s{warn}")
+        print(f"  [{ci + 1:2d}/{len(chunk_names)}] {chunk_name:16s} "
+              f"{nvoice:7d} paquets voix  {len(tracks)} voix  "
+              f"{time.time() - t0:6.1f}s{note}")
+        tick_offset += duration
 
-                # noms de joueurs : on cherche dans le snapshot du premier chunk
-                if ci == 0:
-                    resolved = find_names(mm, snap_start, actions_start, list(tracks))
-                    uuid_cache["__names__"] = resolved
-            finally:
-                mm.close()
-        tick_offset += meta["chunks"][chunk_name]["duration"]
+    if damaged:
+        print(f"\n  [!] {len(damaged)} chunk(s) sur {len(chunk_names)} endommage(s) :")
+        for name, reason, saved in damaged:
+            extra = f" ({saved} paquets voix sauves)" if saved else ""
+            print(f"      {name} : {reason}{extra}")
+        lost = total_ticks - last_ok_tick
+        if lost > 0:
+            print(f"      les {lost / TICKS_PER_SECOND:.1f}s finales du replay sont perdues, "
+                  f"le reste est exploitable")
+        total_ticks = last_ok_tick
 
     if not tracks:
         sys.exit("aucun paquet voix trouve")
 
     # completer la resolution des noms sur les joueurs apparus plus tard
-    names_map = uuid_cache.get("__names__", {})
-    missing = [u for u in tracks if u not in names_map]
-    if missing:
-        with open(replay / chunk_names[0], "rb") as fh:
-            mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
-            try:
-                names_map.update(find_names(mm, 0, len(mm), missing))
-            finally:
-                mm.close()
+    for chunk_name in chunk_names[:3]:
+        missing = [u for u in tracks if u not in names_map]
+        if not missing:
+            break
+        try:
+            with open(replay / chunk_name, "rb") as fh:
+                mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+                try:
+                    names_map.update(find_names(mm, 0, len(mm), missing))
+                finally:
+                    mm.close()
+        except (OSError, ValueError):
+            continue      # chunk illisible : les pistes garderont leur UUID
 
     print("\nfinalisation des pistes...")
     report = []
