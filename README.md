@@ -116,6 +116,18 @@ Environ 400 Mo de replay par seconde. Un replay de 3 heures et 4,3 Go, contenant
 
 **Une piste porte un UUID au lieu d'un pseudo** — le joueur n'apparaissait pas dans les paquets du premier chunk, ou le serveur est en online mode (les UUID n'y dérivent pas du pseudo). L'audio est correct, seul le nom du fichier est concerné.
 
+**`[!] N chunk(s) sur M endommage(s)`** — un ou plusieurs chunks sont abîmés, en général le dernier quand le jeu s'est arrêté brutalement pendant l'enregistrement. **L'extraction va jusqu'au bout quand même** : un chunk abîmé ne fait jamais perdre les autres, et les pistes sont finalisées normalement. Les raisons possibles :
+
+| Message | Signification |
+|---|---|
+| `enregistrement interrompu pendant ce chunk (snapshot non finalise)` | Le jeu s'est arrêté pendant l'écriture du snapshot. Flashback y réserve la taille avec un `0xDEADBEEF` qu'il ne remplace qu'une fois le snapshot terminé, et le marqueur est resté. Le chunk ne contient aucune action : rien à récupérer. |
+| `action coupee a l'octet N` | Le fichier s'arrête au milieu d'une action. Si c'est un paquet voix, la portion de parole encore lisible est récupérée avant l'arrêt. |
+| `flux tronque a l'octet N` | Le fichier s'arrête sur un en-tête d'action incomplet. Tout ce qui précède est conservé. |
+| `fichier vide` / `fichier absent` | Le chunk fait 0 octet ou manque sur le disque, alors que `metadata.json` l'annonce. |
+| `action inconnue (N)` | Index d'action hors de la table déclarée en tête de fichier : les octets ne sont plus alignés sur le flux, la lecture du chunk s'arrête là. |
+
+Si les chunks endommagés sont à la fin, la durée des pistes est ramenée à la dernière seconde réellement enregistrée, et le nombre de secondes perdues est affiché. Si un chunk abîmé se trouve au milieu, les chunks suivants sont lus normalement : le calage temporel vient des durées de `metadata.json`, pas de la continuité de lecture, donc le reste du replay garde sa synchronisation.
+
 **`[!] N ticks lus, M attendus`** — le nombre de ticks compté dans un chunk ne correspond pas à `metadata.json`. L'extraction continue, mais la synchronisation des chunks suivants peut dériver. Signe d'un replay tronqué ou corrompu.
 
 ## Fonctionnement
