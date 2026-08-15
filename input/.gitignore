@@ -1,0 +1,3 @@
+# Garde le dossier dans le depot, mais ignore les replays qu'on y depose.
+*
+!.gitignore
