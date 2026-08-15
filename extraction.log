@@ -1,0 +1,60 @@
+﻿replay      : secret story np part 1 (1.21.11)
+chunks      : 36
+duree       : 212253 ticks = 176.9 min
+sortie      : C:\Users\FlowUP\Desktop\voice separator\output\secret_story_np_part_1
+
+  [ 1/36] c0.flashback       42260 paquets voix  8 voix     0.2s
+  [ 2/36] c1.flashback       33107 paquets voix  9 voix     0.4s
+  [ 3/36] c2.flashback       40939 paquets voix  10 voix     0.6s
+  [ 4/36] c3.flashback       49923 paquets voix  11 voix     0.8s
+  [ 5/36] c4.flashback       45981 paquets voix  11 voix     1.1s
+  [ 6/36] c5.flashback       62113 paquets voix  11 voix     1.4s
+  [ 7/36] c6.flashback       63349 paquets voix  11 voix     1.7s
+  [ 8/36] c7.flashback       55728 paquets voix  11 voix     2.1s
+  [ 9/36] c8.flashback       52399 paquets voix  11 voix     2.4s
+  [10/36] c9.flashback       67010 paquets voix  11 voix     2.7s
+  [11/36] c10.flashback      77038 paquets voix  11 voix     3.0s
+  [12/36] c11.flashback      72649 paquets voix  11 voix     3.4s
+  [13/36] c12.flashback      82460 paquets voix  11 voix     3.8s
+  [14/36] c13.flashback      56015 paquets voix  11 voix     4.1s
+  [15/36] c14.flashback      51068 paquets voix  11 voix     4.4s
+  [16/36] c15.flashback      62613 paquets voix  11 voix     4.7s
+  [17/36] c16.flashback      65200 paquets voix  11 voix     5.0s
+  [18/36] c17.flashback      67257 paquets voix  11 voix     5.3s
+  [19/36] c18.flashback      69043 paquets voix  11 voix     5.7s
+  [20/36] c19.flashback      59440 paquets voix  11 voix     6.0s
+  [21/36] c20.flashback      74898 paquets voix  11 voix     6.4s
+  [22/36] c21.flashback      67947 paquets voix  11 voix     6.7s
+  [23/36] c22.flashback      38739 paquets voix  11 voix     7.0s
+  [24/36] c23.flashback      30303 paquets voix  11 voix     7.3s
+  [25/36] c24.flashback      33678 paquets voix  11 voix     7.5s
+  [26/36] c25.flashback      30973 paquets voix  11 voix     7.6s
+  [27/36] c26.flashback      36124 paquets voix  11 voix     7.8s
+  [28/36] c27.flashback      43124 paquets voix  11 voix     8.1s
+  [29/36] c28.flashback      41584 paquets voix  11 voix     8.3s
+  [30/36] c29.flashback      58224 paquets voix  11 voix     8.6s
+  [31/36] c30.flashback      48399 paquets voix  11 voix     8.9s
+  [32/36] c31.flashback      42614 paquets voix  11 voix     9.1s
+  [33/36] c32.flashback      43400 paquets voix  11 voix     9.3s
+  [34/36] c33.flashback      61861 paquets voix  11 voix     9.7s
+  [35/36] c34.flashback      56046 paquets voix  11 voix     9.9s
+  [36/36] c35.flashback      17486 paquets voix  11 voix    10.1s
+
+finalisation des pistes...
+
+11 pistes, 1900992 paquets voix, 11.1s
+
+piste                        parole   segments  uuid
+LuKaL3.wav                   127.9m       2433  e7922493-7829-3658-9617-0af43ae853c9
+Stino_Onair.wav              103.8m        207  5b9644ba-ab25-3677-bc4e-3ddb4efaa984
+Firecolds.wav                 83.1m       2134  eaecd93c-4dc2-37a4-8a4b-fae87fe30d9e
+iconsfdt.wav                  67.1m       2121  5c343552-b518-33ca-a8e7-c4011216df90
+Jupiter_001.wav               55.3m        579  98cc7c76-56db-35ad-99e7-dc7b570c4d8c
+NiamoR974.wav                 53.2m        918  fd0e5fae-93fb-351c-ab29-3c99fea73df9
+Koda_off.wav                  48.9m        890  361e5637-d89b-3254-af62-524eeac88b6d
+Just_Enno.wav                 36.4m        507  ec19bb35-fe3f-3fac-bf6b-72fdbe19765b
+Marsfix.wav                   33.4m        826  02100f3c-305b-366c-9016-4730d12245a3
+evanmimi.wav                  19.9m       1012  4da4d343-02e2-372f-99f7-3e6ed87ba372
+NonoIce_.wav                   4.6m         68  4018bd64-5457-3813-b22f-5f13bb60d974
+
+toutes les pistes font 176.9 min et demarrent a t=0 du replay -> alignement direct au montage.
